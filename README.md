@@ -1,141 +1,87 @@
 # bb-plugin-deepseek-harness
 
-A BB plugin that keeps a todo list. It shows every surface a plugin can own:
+Run [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) in
+[bb](https://getbb.app) as a first-class agent, the way pi and Cursor are.
 
-- `server.ts` — the backend: a todo store in `bb.storage.kv`, RPC methods
-  for the page, a `bb deepseek-harness` CLI command, a setting, and a realtime signal
-  that keeps every open page current.
-- `app.tsx` — the frontend: an **Example todos** page in the left sidebar
-  (`app.slots.navPanel`) built from the vendored components.
-- `skills/example-todos/SKILL.md` — a skill that tells agents how to keep the list
-  with `bb deepseek-harness`. BB imports it into agent threads automatically.
-- `PLUGIN_OVERVIEW.md` — the store listing text: a longer version of
-  `bb.description` that the plugin detail page shows under it. See
-  [Store listing](#store-listing).
+dsh ships an ACP stdio app (`dsh --profile acp`). This plugin registers it as the
+`acp-deepseek` provider, adds a mode picker above the composer, and installs the
+small pieces dsh needs to behave like a normal bb agent.
 
-Try it: install the plugin, open **Example todos** in the sidebar, then run
-`bb deepseek-harness add "Ship it"` in a terminal. The page updates at once.
+## What you get
 
-## UI components
+- **`acp-deepseek` provider** — dsh threads with models, reasoning effort, streaming,
+  tool calls, context usage, and cancel, driven over ACP.
+- **Standard / Creator / Minimal** — a row above the composer that selects which dsh
+  composition boots (`acp`, `acp-creator`, `acp-minimal`). Creator adds
+  `cordis_inspect_*`, `present`, and plugin-manager tools; Minimal keeps only files,
+  shell, and compaction.
+- **Harness slash commands** — a bundled dsh plugin (`run_command`) exposes dsh's own
+  command registry (`/compact`, `/goal`, `/feedback`) to the agent, and a small patch to
+  `dsh-acp` runs a bare command line typed into the composer without a model turn.
+- **One-command provisioning** — `bb deepseek-harness install` creates the dsh profiles,
+  installs the dsh plugin, applies the ACP patch, and registers the provider.
 
-`components/ui/` is vendored source you own (the shadcn model): edit the
-files freely — they never update out from under you. Add more from the BB
-component registry (the full shadcn set, version-matched to your BB install
-via the pinned ref in `components.json`):
+## Requirements
 
+```sh
+npm i -g @deepseek-ai/dsh          # the harness itself
+node --version                      # dsh needs ^22.19 || >=24
 ```
-npx shadcn add @bb/select @bb/table
-```
 
-Run `npm install` once before `bb plugin build` — the vendored components'
-npm deps bundle into your dist. React, and BB-shimmed packages like the
-radix portal primitives and `sonner` (`import { toast } from "sonner"`
-reaches BB's own toaster), are provided by the BB app at runtime and never
-bundled. Every shimmed package is declared in `devDependencies` at the
-host's version so those imports typecheck; keep them there (never in
-`dependencies`, which would bundle a second copy), and `bb plugin types`
-repins declared packages alongside the SDK; unused packages may be removed. Ship `dist/` (npm tarball or committed for
-git installs) so people installing your plugin never need npm.
+Model credentials come from dsh's own resolution order: `$DSH_HOME/.credentials.yaml`,
+the launch environment, a project `.env`, then `$DSH_HOME/.env`.
 
-## Manifest
-
-`package.json` is the plugin manifest. Notable fields:
-
-- `bb.server` — backend entry (required).
-- `bb.app` — frontend entry. Delete it, `app.tsx`, `components/`,
-  `hooks/`, and `lib/` for a headless plugin.
-- `bb.skills` — skill roots; omitted here, so BB reads `skills/`. Each
-  directory with a `SKILL.md` is one skill, named after the directory.
-- `bb.name` and `bb.description` — required human-facing identity.
-- `bb.branding` — required; declare `icon` as a BB icon name or a
-  plugin-relative compact SVG, or declare `logo.light` (with optional
-  `logo.dark`). Logo assets must be relative `.svg`, `.png`, or
-  `.webp` files.
-- `engines.bb` — supported bb app version range.
-- `engines.bbPluginSdk` — the lowest plugin SDK you need (scaffold:
-  `>=0.6.49`). BB reads this as a floor, not a ceiling: a later
-  SDK in the same major still loads your plugin.
-- `dependencies` — every package your source imports that BB does not provide.
-  `bb plugin build` inlines them into `dist/`, and git installs resolve this
-  list alone, so a build-required package here rather than in
-  `devDependencies` is what keeps your plugin installable. `devDependencies`
-  is for types and tooling only (BB shims React, the portal primitives, and
-  `@get-bb/plugin-sdk` at runtime — never bundle them).
-
-Run `bb plugin build` before publishing git/npm installs. It writes
-`dist/server.js` + `server.meta.json` and `app.js` / `app.css` /
-`app.meta.json`. Each `*.meta.json` stamps SDK major/version,
-`artifactFormatVersion`, `pluginId`, `pluginVersion`, and
-`builtWith` so managed installs can verify the artifacts.
-
-## Store listing
-
-Two texts describe the plugin in the store. `bb.description` in package.json
-is the one-sentence hook on every browse card and the lead paragraph on the
-detail page; keep it under about 140 characters. `PLUGIN_OVERVIEW.md` is the
-same claim at length, shown in an Overview section under that paragraph.
-Rewrite the scaffold's copy for your plugin, and update it whenever
-`bb.description` changes, so the two never disagree.
-
-The submission to the public BB Community marketplace requires the file. Keep
-it under 4000 characters (aim for 700 to 1800) and use headings, paragraphs,
-emphasis, code, blockquotes, lists, thematic breaks, and absolute https links
-only — raw HTML, images, tables, footnotes, and task lists are rejected. Do
-not open with a `#` title or repeat `bb.description` verbatim; the page
-shows both directly above.
+Workspaces must be writable directories — **not a drive root**. dsh's filesystem layer
+`mkdir`s the workspace root on every write, so `E:\` fails with `EPERM` even with full
+access.
 
 ## Install
 
-From this directory (`bb plugin new` already ran the install; a fresh clone
-needs it):
-
-```
-npm install
-bb plugin install .
+```sh
+bb plugin install .        # from this directory
+bb deepseek-harness install
+bb deepseek-harness status
 ```
 
-After editing sources, reload:
+Then pick **DeepSeek Harness** in the model menu and choose a mode above the prompt box.
 
-```
-bb plugin reload deepseek-harness
-```
+Re-run `bb deepseek-harness install` after every dsh upgrade: `npm i -g` replaces the
+install tree, which takes the `run_command` plugin and the `dsh-acp` patch with it. The
+plugin is idempotent and refuses to patch if dsh-acp's code shape has moved.
 
-Or let `bb plugin dev` rebuild and reload on every save.
+## CLI
 
-## Configure
-
-```
-bb plugin config deepseek-harness
-bb plugin config deepseek-harness set showDone false
-bb plugin reload deepseek-harness
-```
-
-## Types & API reference
-
-The plugin API ships as the npm package `@get-bb/plugin-sdk`, pinned to an
-exact version in `devDependencies` (`0.6.49` — the SDK of the BB
-that scaffolded this plugin). After `npm install`, the full surface is on disk
-at:
-
-```
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk.d.ts      # backend
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk-app.d.ts  # frontend
+```sh
+bb deepseek-harness status              # what is installed, current mode
+bb deepseek-harness install             # (re)provision everything
+bb deepseek-harness mode                # mode new threads will use
+bb deepseek-harness mode creator        # standard | creator | minimal
 ```
 
-Your editor and `tsc` resolve `@get-bb/plugin-sdk` there through ordinary node
-resolution — no path mapping. These are readable declarations: open them for an
-exact signature.
+## How it works
 
-The SDK surface grows with every BB release, so the pin has to track the BB you
-actually run:
+| file | role |
+|---|---|
+| `server.ts` | RPC for the composer banner, the CLI, and provisioning |
+| `app.tsx` | the mode row rendered above the composer (only for `acp-deepseek`) |
+| `assets/launcher.mjs` | reads `~/.bb-dsh-modes/state.json` and execs `dsh --profile <mode>` |
+| `assets/dsh-command-tool/` | dsh plugin: `run_command` over dsh's command registry |
+| `assets/acp-patch.mjs` | patches `dsh-acp`: advertise commands, intercept bare command lines |
 
-```
-bb plugin types          # sync this plugin's SDK surface to the running BB
-bb plugin types --check  # CI: fail when it does not match
-```
+State lives in `~/.bb-dsh-modes/` (`state.json`, `threads/`, `launcher.log`).
 
-Ask BB to write plugins for you: the `bb-plugin-authoring` skill documents
-the whole surface with examples.
+## Known limitations
 
-Confused by the API, or need something the types don't explain? Clone the BB
-repo and read the source: <https://github.com/get-bb/bb>.
+- **Commands are not listed in bb's `/` menu.** The patch advertises them over ACP, but
+  bb's active ACP plugin (`provider-acp`) does not read `availableCommands`; only the
+  newer `provider-acp-next` does. Typed commands still run through the interception path.
+- **`/compact` mid-thread is refused by dsh** ("the agent is not idle"): the ACP bridge
+  keeps the agent busy between turns. Compaction therefore stays automatic.
+- **Approvals do not surface.** dsh's ACP bridge never sends `session/request_permission`,
+  so bb's permission picker has nothing to answer for this provider.
+- **The ACP patch is a vendor patch**, not a plugin: it edits the installed dsh package
+  and must be re-applied after upgrades.
+
+## License
+
+MIT
