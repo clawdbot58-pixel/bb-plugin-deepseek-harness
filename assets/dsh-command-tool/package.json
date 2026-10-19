@@ -1,0 +1,16 @@
+{
+  "name": "@deepseek-ai/dsh-command-tool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Exposes DeepSeek Harness slash commands to ACP clients as the run_command tool.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}
