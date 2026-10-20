@@ -73,7 +73,14 @@ if (!fs.existsSync(DSH_BIN)) {
 const child = spawn(process.execPath, [DSH_BIN, "--profile", profile], {
   stdio: "inherit",
   shell: false,
-  env: process.env,
+  env: {
+    ...process.env,
+    // dsh's workspace-write sandbox calls SetNamedSecurityInfoW to grant itself
+    // write on the workspace root. On a drive root that fails with Win32 5 and
+    // every tool call errors out, so dsh runs unconfined: bb already enforces
+    // permissions on its side. Override with DSH_PERMISSION_MODE=workspace-write.
+    DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE ?? "danger-full-access",
+  },
 });
 
 child.on("exit", (code, signal) => {

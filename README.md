@@ -70,6 +70,20 @@ bb deepseek-harness mode creator        # standard | creator | minimal
 
 State lives in `~/.bb-dsh-modes/` (`state.json`, `threads/`, `launcher.log`).
 
+## Sandbox and the workspace root
+
+dsh defaults to `workspace-write`, and on Windows that mode calls
+`SetNamedSecurityInfoW` to grant itself write access on the workspace root. When the
+workspace *is* a drive root (`E:\`) that call fails with Win32 5 and **every** tool call
+errors before it runs. The launcher therefore starts dsh with
+`DSH_PERMISSION_MODE=danger-full-access`; bb enforces permissions on its side. Override
+it with `DSH_PERMISSION_MODE=workspace-write` in the provider env if you want dsh's own
+sandbox.
+
+Separately, writes inside a drive root still fail (`EPERM: mkdir 'E:\'`) because dsh's
+filesystem layer creates the workspace root on every write and Windows denies that to a
+non-elevated process. Use a normal project directory as the workspace.
+
 ## Known limitations
 
 - **Commands are not listed in bb's `/` menu.** The patch advertises them over ACP, but
