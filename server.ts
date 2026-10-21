@@ -30,6 +30,8 @@ const STATE_DIR = path.join(HOME, ".bb-dsh-modes");
 const STATE_FILE = path.join(STATE_DIR, "state.json");
 const THREAD_DIR = path.join(STATE_DIR, "threads");
 const LAUNCHER = path.join(STATE_DIR, "launcher.mjs");
+const ACP_PATCH = path.join(STATE_DIR, "acp-patch.mjs");
+const TOOL_ASSETS = path.join(STATE_DIR, "dsh-command-tool");
 const PROFILES = ["acp", "acp-creator", "acp-minimal"] as const;
 const PROFILE_MODE: Record<(typeof PROFILES)[number], string> = {
   acp: "standard",
@@ -145,6 +147,13 @@ async function provision(): Promise<string[]> {
   fs.copyFileSync(asset("launcher.mjs"), LAUNCHER);
   log.push(`launcher: ${LAUNCHER}`);
 
+  // The launcher re-applies these after a dsh upgrade, so keep copies outside the
+  // package tree that `npm i -g @deepseek-ai/dsh` replaces.
+  fs.copyFileSync(asset("acp-patch.mjs"), ACP_PATCH);
+  fs.mkdirSync(TOOL_ASSETS, { recursive: true });
+  for (const file of ["package.json", "index.js"]) fs.copyFileSync(asset(`dsh-command-tool/${file}`), path.join(TOOL_ASSETS, file));
+  log.push("self-repair assets: acp patch, run_command");
+
   for (const profile of PROFILES) log.push(provisionProfile(profile));
 
   const toolDir = path.join(DSH_ROOT, "node_modules", "@deepseek-ai", "dsh-command-tool");
@@ -226,13 +235,16 @@ function status(): string[] {
     rows.push(`${profile}: ${patched ? "configured" : "not configured"} (${PROFILE_MODE[profile]})`);
   }
   rows.push(`run_command: ${fs.existsSync(path.join(DSH_ROOT, "node_modules", "@deepseek-ai", "dsh-command-tool", "index.js")) ? "installed" : "missing"}`);
-  let patched = false;
+  let acp = "";
   try {
-    patched = fs.readFileSync(DSH_ACP_FILE, "utf8").includes("bbAcpRunCommand");
+    acp = fs.readFileSync(DSH_ACP_FILE, "utf8");
   } catch {
-    patched = false;
+    acp = "";
   }
-  rows.push(`dsh-acp command patch: ${patched ? "applied" : "not applied"}`);
+  rows.push(`dsh-acp command patch: ${acp.includes("bbAcpRunCommand") ? "applied" : "not applied"}`);
+  rows.push(`dsh-acp session/load bridge: ${acp.includes("bbAcpLoadSessionBridge") ? "applied" : "not applied"}`);
+  const selfRepair = fs.existsSync(ACP_PATCH) && fs.existsSync(path.join(TOOL_ASSETS, "index.js"));
+  rows.push(`upgrade self-repair: ${selfRepair ? "armed" : "missing (re-run install)"}`);
   return rows;
 }
 

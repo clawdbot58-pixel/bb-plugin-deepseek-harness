@@ -12,13 +12,16 @@ the `acp-deepseek` provider, using dsh's ACP stdio app (`dsh --profile acp`).
 
 ```sh
 bb deepseek-harness status            # what is installed, which mode, which profiles
-bb deepseek-harness install           # (re)provision after a dsh upgrade
+bb deepseek-harness install           # full (re)provision on a new or broken install
 bb deepseek-harness mode              # mode new threads will use
 bb deepseek-harness mode creator      # standard | creator | minimal
 ```
 
-`install` is idempotent. Run it after every `npm i -g @deepseek-ai/dsh`, because dsh
-upgrades replace the patched `dsh-acp` bridge and the injected `run_command` plugin.
+`install` is idempotent. A `npm i -g @deepseek-ai/dsh` upgrade replaces the patched
+`dsh-acp` bridge and the injected `run_command` plugin, but the launcher keeps copies in
+`~/.bb-dsh-modes` and re-applies both on the first dsh launch after the upgrade. Run
+`install` when the launcher logs `FAILED (inspect anchors)` (upstream code moved), after
+moving to a new machine, or to re-register the provider.
 
 ## Modes
 
@@ -30,6 +33,14 @@ upgrades replace the patched `dsh-acp` bridge and the injected `run_command` plu
 
 The mode applies when a thread's dsh process starts; dsh itself locks its preset at
 the session's first turn, so changing it later does not switch a running thread.
+
+## Session continuity
+
+Reopening a thread after bb restarts continues the same dsh session with its earlier
+context. bb's stable ACP adapter restores through `session/load`, which dsh does not
+implement natively, so the patch advertises `loadSession` and routes it to dsh's
+persisted-session resume path. Without the patch, bb silently falls back to a fresh
+session ("could not restore the previous session").
 
 ## Commands
 

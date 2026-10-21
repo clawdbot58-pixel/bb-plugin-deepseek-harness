@@ -18,6 +18,9 @@ small pieces dsh needs to behave like a normal bb agent.
 - **Harness slash commands** — a bundled dsh plugin (`run_command`) exposes dsh's own
   command registry (`/compact`, `/goal`, `/feedback`) to the agent, and a small patch to
   `dsh-acp` runs a bare command line typed into the composer without a model turn.
+- **Session continuity** — closing bb and picking a thread back up continues the same
+  dsh session, with its history. The patch bridges ACP `session/load` (what bb's stable
+  adapter uses) onto dsh's persisted-session resume path.
 - **One-command provisioning** — `bb deepseek-harness install` creates the dsh profiles,
   installs the dsh plugin, applies the ACP patch, and registers the provider.
 
@@ -45,9 +48,13 @@ bb deepseek-harness status
 
 Then pick **DeepSeek Harness** in the model menu and choose a mode above the prompt box.
 
-Re-run `bb deepseek-harness install` after every dsh upgrade: `npm i -g` replaces the
-install tree, which takes the `run_command` plugin and the `dsh-acp` patch with it. The
-plugin is idempotent and refuses to patch if dsh-acp's code shape has moved.
+`npm i -g @deepseek-ai/dsh` replaces the install tree, which takes the
+`run_command` plugin and the `dsh-acp` patch with it. The next dsh launch heals
+that automatically: the launcher keeps copies in `~/.bb-dsh-modes` and re-applies
+them before boot, so session continuity survives upgrades without a manual step.
+Re-run `bb deepseek-harness install` if the patch anchors moved (the launcher logs
+`FAILED (inspect anchors)`), to re-register the provider, or to restore a machine
+after moving bb. The plugin is idempotent.
 
 ## CLI
 
@@ -64,11 +71,12 @@ bb deepseek-harness mode creator        # standard | creator | minimal
 |---|---|
 | `server.ts` | RPC for the composer banner, the CLI, and provisioning |
 | `app.tsx` | the mode row rendered above the composer (only for `acp-deepseek`) |
-| `assets/launcher.mjs` | reads `~/.bb-dsh-modes/state.json` and execs `dsh --profile <mode>` |
+| `assets/launcher.mjs` | reads `~/.bb-dsh-modes/state.json`, self-heals upgrades, and execs `dsh --profile <mode>` |
 | `assets/dsh-command-tool/` | dsh plugin: `run_command` over dsh's command registry |
-| `assets/acp-patch.mjs` | patches `dsh-acp`: advertise commands, intercept bare command lines |
+| `assets/acp-patch.mjs` | patches `dsh-acp`: advertise commands, intercept bare command lines, bridge `session/load` to resume |
 
-State lives in `~/.bb-dsh-modes/` (`state.json`, `threads/`, `launcher.log`).
+State lives in `~/.bb-dsh-modes/` (`state.json`, `threads/`, `launcher.log`, plus the
+`acp-patch.mjs` and `dsh-command-tool/` copies the launcher uses for self-repair).
 
 ## Sandbox and the workspace root
 
@@ -93,8 +101,14 @@ non-elevated process. Use a normal project directory as the workspace.
   keeps the agent busy between turns. Compaction therefore stays automatic.
 - **Approvals do not surface.** dsh's ACP bridge never sends `session/request_permission`,
   so bb's permission picker has nothing to answer for this provider.
-- **The ACP patch is a vendor patch**, not a plugin: it edits the installed dsh package
-  and must be re-applied after upgrades.
+- **The ACP patch is a vendor patch**, not a plugin: it edits the installed dsh package.
+  The launcher re-applies it from `~/.bb-dsh-modes/acp-patch.mjs` on the first dsh launch
+  after an upgrade, but an upstream code-shape change (moved anchors) still needs a
+  plugin release.
+- **`session/load` does not replay history.** The patch answers it with dsh's resume path,
+  which restores the agent context but sends no `session/update` replay. bb keeps its own
+  transcript and discards replay while loading, so this is what makes bb continuity work;
+  a client that relies on replay to rebuild the conversation would see it empty.
 
 ## License
 

@@ -1,17 +1,29 @@
 // Applies (and re-applies) the ACP patch to the installed dsh.
 //
-// Three anchored insertions in @deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-acp/lib/index.js:
+// Anchored insertions in @deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-acp/lib/index.js:
 //   1. newSession(): advertise the harness's slash commands over ACP
 //   2. AcpSession.prompt() head: run a bare command line instead of a model turn
 //   3. module-scope helpers at end of file (function declarations hoist)
+//   4. initialize()/routing: advertise `loadSession` and answer `session/load`
+//      with dsh's persisted-session resume path.
+//
+// (4) matters for bb: its stable ACP adapter only restores a thread when the
+// agent advertises the older `loadSession` capability, and it calls
+// `session/load` for that. dsh only advertised the newer
+// `sessionCapabilities.resume`, so bb always gave up and the thread continued
+// in a brand-new dsh session without the earlier context. bb already keeps the
+// transcript on its side and ignores replayed updates while loading, so routing
+// `session/load` to the resume path restores the agent context without
+// duplicating history.
 //
 // The client (bb) prepends a system-instructions block to the first prompt, so
-// the matcher looks for the last text block that is exactly one command line.
-// The bridge injects neither `commands` nor an advertiser, so both helpers
+// the command matcher looks for the last text block that is exactly one command
+// line. The bridge injects neither `commands` nor an advertiser, so both helpers
 // reach the service with ctx.get("commands").
 //
-// Idempotent: an already-patched file is reported and left alone. `npm i -g
-// @deepseek-ai/dsh` replaces the package, so re-run this afterwards.
+// Idempotent: each insertion is checked and applied on its own. `npm i -g
+// @deepseek-ai/dsh` replaces the package, so re-run this afterwards (the
+// deepseek-harness plugin does that on install).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -34,6 +46,12 @@ const PROMPT_INJECT = `${PROMPT_ANCHOR}\t\tconst bbCommandLine = bbAcpCommandLin
 
 const SESSION_ANCHOR = `\t\t\tsessions.set(sessionId, record);\n`;
 const SESSION_INJECT = `${SESSION_ANCHOR}\t\t\tvoid bbAcpAdvertiseCommands(record);\n`;
+
+const LOAD_CAP_ANCHOR = `\t\t\t\tagentCapabilities: {\n\t\t\t\t\tmcpCapabilities: { http: true },`;
+const LOAD_CAP_INJECT = `\t\t\t\tagentCapabilities: {\n\t\t\t\t\t// bbAcpLoadSessionBridge: legacy ACP clients restore with session/load.\n\t\t\t\t\tloadSession: true,\n\t\t\t\t\tmcpCapabilities: { http: true },`;
+
+const LOAD_ROUTE_ANCHOR = `.onRequest(methods.agent.session.close,`;
+const LOAD_ROUTE_INJECT = `.onRequest(methods.agent.session.load, ({ params, signal }) => implementation.resumeSession(params, signal))${LOAD_ROUTE_ANCHOR}`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -92,25 +110,48 @@ async function bbAcpRunCommand(record, line, signal) {
 }
 `;
 
+function fail(message) {
+  console.error(`${message} — dsh-acp changed shape; inspect before patching`);
+  process.exit(1);
+}
+
 try {
-  const source = fs.readFileSync(FILE, "utf8");
-  if (source.includes("bbAcpRunCommand")) {
+  const original = fs.readFileSync(FILE, "utf8");
+  let source = original;
+  const applied = [];
+
+  if (!source.includes("bbAcpRunCommand")) {
+    for (const [label, anchor] of [
+      ["prompt()", PROMPT_ANCHOR],
+      ["newSession()", SESSION_ANCHOR],
+    ]) {
+      if (!source.includes(anchor)) fail(`anchor not found in ${label}`);
+    }
+    source = source.replace(PROMPT_ANCHOR, PROMPT_INJECT).replace(SESSION_ANCHOR, SESSION_INJECT) + HELPERS;
+    applied.push("command bridge");
+  }
+
+  if (!source.includes("bbAcpLoadSessionBridge")) {
+    for (const [label, anchor] of [
+      ["initialize() capabilities", LOAD_CAP_ANCHOR],
+      ["request routing", LOAD_ROUTE_ANCHOR],
+    ]) {
+      if (!source.includes(anchor)) fail(`anchor not found in ${label}`);
+    }
+    source = source.replace(LOAD_CAP_ANCHOR, LOAD_CAP_INJECT).replace(LOAD_ROUTE_ANCHOR, LOAD_ROUTE_INJECT);
+    applied.push("session/load bridge");
+  }
+
+  if (applied.length === 0) {
     console.log("already patched:", FILE);
     process.exit(0);
   }
-  for (const [label, anchor] of [
-    ["prompt()", PROMPT_ANCHOR],
-    ["newSession()", SESSION_ANCHOR],
-  ]) {
-    if (!source.includes(anchor)) {
-      console.error(`anchor not found in ${label} — dsh-acp changed shape; inspect before patching`);
-      process.exit(1);
-    }
-  }
-  fs.writeFileSync(`${FILE}.pre-bb`, source);
-  const patched = source.replace(PROMPT_ANCHOR, PROMPT_INJECT).replace(SESSION_ANCHOR, SESSION_INJECT);
-  fs.writeFileSync(FILE, patched + HELPERS);
-  console.log("patched:", FILE);
+
+  // Keep the pristine package copy for reference/repair, but never overwrite it
+  // once it exists: it must stay the unpatched source.
+  if (!fs.existsSync(`${FILE}.pre-bb`)) fs.writeFileSync(`${FILE}.pre-bb`, original);
+  fs.writeFileSync(FILE, source);
+  console.log("patched:", FILE, `(${applied.join(", ")})`);
   console.log("backup:", `${FILE}.pre-bb`);
 } catch (err) {
   console.error("patch failed:", err.message);
