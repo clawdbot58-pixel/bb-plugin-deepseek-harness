@@ -23,6 +23,35 @@ bb deepseek-harness mode creator      # standard | creator | minimal
 `install` when the launcher logs `FAILED (inspect anchors)` (upstream code moved), after
 moving to a new machine, or to re-register the provider.
 
+## Subagents
+
+dsh subagents run in-process inside the thread's dsh session; ACP carries nothing about
+them, so a thread shows one `subagent` tool row per child and no transcript. The plugin
+fills that gap from the state dsh persists for its own UI:
+
+```sh
+bb deepseek-harness subagents            # this thread (BB_THREAD_ID)
+bb deepseek-harness subagents <thread>   # any thread
+```
+
+The composer chip appears only when a thread has deployed at least one child. It sits in
+the composer's action row beside the model picker, shows `running/total` while any child
+is live, and opens a panel above the composer where each child expands to its prompt, the
+last 20 tool calls, and its final message. The panel is a composer banner mounted only
+while open — host popups and floating overlays are not reliable across bb's thread views.
+
+Where the data comes from, and what it cannot do:
+
+- roster: the parent session's `subagentCatalog` projection in
+  `~/.dsh/storages/session_projcache/sessions/<session>.json`
+- status, elapsed, tokens: each child's `turnBoundary` / `subagentTiming` /
+  `tokenUsage` projections
+- current activity: the newest zstd frame of the child's
+  `~/.dsh/sessions/<cwd>/<child>/session.v4.jsonl.zstd`
+- these are dsh implementation details, not a public API. A dsh upgrade that renames
+  them degrades the row to a count, never breaks the thread. Children stay invisible to
+  bb's thread list, cancel, and resume; only the root session is resumable.
+
 ## Modes
 
 | mode | dsh profile | tool surface |
@@ -32,7 +61,11 @@ moving to a new machine, or to re-register the provider.
 | Minimal | `acp-minimal` | files, shell, compaction only |
 
 The mode applies when a thread's dsh process starts; dsh itself locks its preset at
-the session's first turn, so changing it later does not switch a running thread.
+the session's first turn, so changing it later does not switch a running thread. The
+picker therefore renders only in the New thread composer. A thread shows a read-only
+badge with the composition it booted with, resolved from
+`~/.bb-dsh-modes/threads/<thread>.json` (written by the launcher on every launch) and
+falling back to the launcher log for threads started before that record existed.
 
 ## Session continuity
 

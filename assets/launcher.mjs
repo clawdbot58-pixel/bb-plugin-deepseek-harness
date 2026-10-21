@@ -167,6 +167,27 @@ const { mode, source } = resolveMode();
 const profile = MODE_PROFILE[mode];
 log(`launch thread=${process.env.BB_THREAD_ID ?? "-"} mode=${mode} (${source}) profile=${profile}`);
 
+// Record what this thread actually booted with. The composer shows it read-only,
+// because neither bb nor dsh can change the composition of a started session.
+// bb passes BB_THREAD_ID to the provider process for thread launches (drafts and
+// some restarts come through without it).
+function recordThreadMode(threadId, bootedMode) {
+  if (typeof threadId !== "string" || !/^[A-Za-z0-9_-]+$/u.test(threadId)) return;
+  try {
+    const dir = path.join(STATE_DIR, "threads");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      path.join(dir, `${threadId}.json`),
+      `${JSON.stringify({ mode: bootedMode, profile: MODE_PROFILE[bootedMode], recordedAt: new Date().toISOString() }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  } catch (err) {
+    log(`thread mode record failed: ${err.message}`);
+  }
+}
+
+recordThreadMode(process.env.BB_THREAD_ID, mode);
+
 if (!fs.existsSync(DSH_BIN)) {
   log(`fatal: dsh entry not found at ${DSH_BIN}`);
   process.exit(1);

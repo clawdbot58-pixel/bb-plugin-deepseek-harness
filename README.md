@@ -11,16 +11,23 @@ small pieces dsh needs to behave like a normal bb agent.
 
 - **`acp-deepseek` provider** — dsh threads with models, reasoning effort, streaming,
   tool calls, context usage, and cancel, driven over ACP.
-- **Standard / Creator / Minimal** — a row above the composer that selects which dsh
-  composition boots (`acp`, `acp-creator`, `acp-minimal`). Creator adds
+- **Standard / Creator / Minimal** — a row in the New thread composer that selects which
+  dsh composition boots (`acp`, `acp-creator`, `acp-minimal`). Creator adds
   `cordis_inspect_*`, `present`, and plugin-manager tools; Minimal keeps only files,
-  shell, and compaction.
+  shell, and compaction. dsh locks its preset at the session's first turn, so inside a
+  thread the row is replaced by a read-only badge naming the composition it started in.
 - **Harness slash commands** — a bundled dsh plugin (`run_command`) exposes dsh's own
   command registry (`/compact`, `/goal`, `/feedback`) to the agent, and a small patch to
   `dsh-acp` runs a bare command line typed into the composer without a model turn.
 - **Session continuity** — closing bb and picking a thread back up continues the same
   dsh session, with its history. The patch bridges ACP `session/load` (what bb's stable
   adapter uses) onto dsh's persisted-session resume path.
+- **Subagent visibility** — dsh children never cross the ACP wire, so the plugin reads
+  the state dsh persists for its own UI: a compact chip in the composer's action row
+  (beside the model picker) shows how many subagents the thread deployed and how many
+  are running, and opens a popup listing each child's label, status, elapsed time,
+  tokens, current tool call, last steps, and result.
+  `bb deepseek-harness subagents [thread-id]` prints the same roster.
 - **One-command provisioning** — `bb deepseek-harness install` creates the dsh profiles,
   installs the dsh plugin, applies the ACP patch, and registers the provider.
 
