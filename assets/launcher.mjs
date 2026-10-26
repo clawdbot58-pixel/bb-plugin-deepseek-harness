@@ -43,7 +43,7 @@ const MODE_PROFILE = {
 };
 
 // Both bridges must be present; an upgrade wipes the whole file.
-const PATCH_MARKERS = ["bbAcpRunCommand", "bbAcpLoadSessionBridge"];
+const PATCH_MARKERS = ["bbAcpRunCommand", "bbAcpLoadSessionBridge", "bbAcpProjectToolCall"];
 
 function log(line) {
   try {

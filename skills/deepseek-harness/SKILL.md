@@ -23,6 +23,26 @@ bb deepseek-harness mode creator      # standard | creator | minimal
 `install` when the launcher logs `FAILED (inspect anchors)` (upstream code moved), after
 moving to a new machine, or to re-register the provider.
 
+## Timeline integration (fidelity projection)
+
+The `dsh-acp` patch also projects dsh's UI-only facts onto standard ACP updates, so a,
+thread shows the same richness other providers get:
+
+- `tool_call` updates carry a real `kind` and a useful title: `bash` → `execute` (streamed
+  command row), `read`/`read_image`/`str_replace_editor view` → `read`, `edit`/`write`/
+  `str_replace_editor` → `edit` with file locations, `glob`/`grep`/`web_search` → `search`,
+  `web_fetch` → `fetch`. `run_code`, `subagent`, `ask_user_question`, goals, `run_command`,
+  and `skill` surface their description/objective/question as the row title. Unknown tools
+  fall back to the generic row — a dsh upgrade that renames tools only degrades titles.
+- `todo/write` events become ACP `plan` updates, rendered as a live task list.
+- `compaction/start` / `compaction/end` become a "Compacting conversation history" row
+  that closes on completion (or fails visibly).
+
+```sh
+bb deepseek-harness status            # three patch lines report what is applied
+bb deepseek-harness install           # re-apply all patch sections
+```
+
 ## Subagents
 
 dsh subagents run in-process inside the thread's dsh session; ACP carries nothing about

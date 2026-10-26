@@ -22,6 +22,12 @@ small pieces dsh needs to behave like a normal bb agent.
 - **Session continuity** — closing bb and picking a thread back up continues the same
   dsh session, with its history. The patch bridges ACP `session/load` (what bb's stable
   adapter uses) onto dsh's persisted-session resume path.
+- **Rich timeline rows** — a fidelity projection in the same `dsh-acp` patch translates what dsh
+  keeps for its own UI into standard ACP facts, so bb renders dsh threads the way it renders
+  Claude Code: `bash` streams as a live command row, `read`/`edit`/`write` show the target file,
+  searches show the pattern or query, `run_code` and subagents carry their description,
+  `todo_write` renders as a live task list, and automatic compaction gets a visible
+  "Compacting conversation history" row that closes when it finishes (or reports the failure).
 - **Subagent visibility** — dsh children never cross the ACP wire, so the plugin reads
   the state dsh persists for its own UI: a compact chip in the composer's action row
   (beside the model picker) shows how many subagents the thread deployed and how many
@@ -80,7 +86,7 @@ bb deepseek-harness mode creator        # standard | creator | minimal
 | `app.tsx` | the mode row rendered above the composer (only for `acp-deepseek`) |
 | `assets/launcher.mjs` | reads `~/.bb-dsh-modes/state.json`, self-heals upgrades, and execs `dsh --profile <mode>` |
 | `assets/dsh-command-tool/` | dsh plugin: `run_command` over dsh's command registry |
-| `assets/acp-patch.mjs` | patches `dsh-acp`: advertise commands, intercept bare command lines, bridge `session/load` to resume |
+| `assets/acp-patch.mjs` | patches `dsh-acp`: advertise commands, intercept bare command lines, bridge `session/load` to resume, and project UI facts (tool kinds/titles/locations, todo lists, compaction) onto the wire |
 
 State lives in `~/.bb-dsh-modes/` (`state.json`, `threads/`, `launcher.log`, plus the
 `acp-patch.mjs` and `dsh-command-tool/` copies the launcher uses for self-repair).
