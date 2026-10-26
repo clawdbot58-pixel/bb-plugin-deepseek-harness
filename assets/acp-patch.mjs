@@ -21,6 +21,8 @@
 //      no tool row for todo_write (it renders as the plan task list).
 //   8. row style: remaining kind-"other" rows (unknown tools, compaction,
 //      retries) become named switch_mode rows instead of bb's toolbox glyph.
+//   9. subagent rows: tag dsh's subagent tool as spawn_subagent so bb's grok
+//      dialect (set on the provider registration) draws a native subagent row.
 //
 // (4) matters for bb: its stable ACP adapter only restores a thread when the
 // agent advertises the older `loadSession` capability, and it calls
@@ -130,6 +132,12 @@ const STYLE_COMPACTION_ANCHOR = `: bbAcpCompactionUpdate(event, event.type === "
 const STYLE_COMPACTION_INJECT = `: bbAcpStyleRow(bbAcpCompactionUpdate(event, event.type === "compaction/start" ? "start" : "end"));`;
 const STYLE_RETRY_ANCHOR = `event.type === "llm/retry" ? bbAcpRetryUpdates(this, event) :`;
 const STYLE_RETRY_INJECT = `event.type === "llm/retry" ? bbAcpRetryUpdates(this, event).map((update) => bbAcpStyleRow(update)) :`;
+
+// --- subagent rows ------------------------------------------------------------
+// The provider registers with bb's "grok" ACP dialect, which turns a tool call
+// tagged spawn_subagent into a native subagent row instead of a generic one.
+const DELEGATION_ANCHOR = `update: bbAcpStyleRow(bbAcpPolishToolCall(event), event)`;
+const DELEGATION_INJECT = `update: bbAcpDelegationRow(bbAcpStyleRow(bbAcpPolishToolCall(event), event), event)`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -475,6 +483,23 @@ function bbAcpStyleRow(update, event) {
 }
 `;
 
+const DELEGATION_HELPERS = `
+// bb patch (subagent rows): bb renders a native subagent (delegation) row for
+// ACP agents on its "grok" dialect when a tool call carries
+// _meta["x.ai/tool"].name === "spawn_subagent"; it reads description/prompt
+// from rawInput and closes the row with the tool result. dsh's subagent tool
+// takes exactly those arguments, so tag it.
+function bbAcpDelegationRow(update, event) {
+\ttry {
+\t\tif (!bbAcpIsObject(update) || update.sessionUpdate !== "tool_call" || event?.data?.name !== "subagent") return update;
+\t\tconst meta = bbAcpIsObject(update._meta) ? update._meta : {};
+\t\treturn { ...update, kind: "other", _meta: { ...meta, "x.ai/tool": { name: "spawn_subagent" } } };
+\t} catch {
+\t\treturn update;
+\t}
+}
+`;
+
 function fail(message) {
   console.error(`${message} — dsh-acp changed shape; inspect before patching`);
   process.exit(1);
@@ -559,6 +584,12 @@ try {
       .replace(STYLE_COMPACTION_ANCHOR, STYLE_COMPACTION_INJECT)
       .replace(STYLE_RETRY_ANCHOR, STYLE_RETRY_INJECT) + STYLE_HELPERS;
     applied.push("row style");
+  }
+
+  if (!source.includes("bbAcpDelegationRow")) {
+    if (!source.includes(DELEGATION_ANCHOR)) fail("anchor not found in styled tool_call projection");
+    source = source.replace(DELEGATION_ANCHOR, DELEGATION_INJECT) + DELEGATION_HELPERS;
+    applied.push("subagent rows");
   }
 
   if (applied.length === 0) {

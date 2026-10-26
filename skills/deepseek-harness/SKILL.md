@@ -46,6 +46,11 @@ thread shows the same richness other providers get:
   Tools bb has no closer kind for (unknown/MCP tools, subagent, questions, goals,
   compaction, retries) are sent as named `switch_mode` rows: a sliders glyph labelled
   "Ran <tool>" rather than bb's toolbox glyph.
+- Subagents: the provider registers with bb's `grok` ACP dialect and the patch tags dsh's
+  `subagent` tool call with `_meta["x.ai/tool"].name = "spawn_subagent"`, so bb draws its
+  native subagent row ("Running subagent · <description>", closing with the child's
+  result). bb's ACP bridge cannot nest a child's own tool calls under it; the composer
+  chip/popup below shows each child's live state.
 - Compaction policy: dsh triggers at `min(0.8 × window, window − maxTokens −
   headroomTokens)`, and `headroomTokens` defaults to 65536 (also the summary cap), which
   with a large model `maxTokens` fires at a quarter of a 200k window. The plugin's managed

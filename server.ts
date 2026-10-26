@@ -287,6 +287,9 @@ async function provision(): Promise<string[]> {
       command: "node",
       args: [LAUNCHER],
       env: { DSH_HOME: path.join(HOME, ".dsh") },
+      // bb's grok dialect renders a tool call tagged spawn_subagent (the ACP patch
+      // tags dsh's subagent tool) as a native subagent row.
+      dialect: "grok",
       nativeReasoning: {
         configId: "reasoning_effort",
         supportedLevels: ["none", "low", "medium", "high", "max"],
@@ -351,6 +354,7 @@ function status(): string[] {
   rows.push(`dsh-acp live stream: ${acp.includes("bbAcpLiveStream") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp row polish: ${acp.includes("bbAcpRowPolish") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp row style: ${acp.includes("bbAcpRowStyle") ? "applied" : "not applied"}`);
+  rows.push(`dsh-acp subagent rows: ${acp.includes("bbAcpDelegationRow") ? "applied" : "not applied"}`);
   const selfRepair = fs.existsSync(ACP_PATCH) && fs.existsSync(path.join(TOOL_ASSETS, "index.js"));
   rows.push(`upgrade self-repair: ${selfRepair ? "armed" : "missing (re-run install)"}`);
   return rows;
