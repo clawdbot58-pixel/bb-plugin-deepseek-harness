@@ -185,8 +185,8 @@ function ensureLink(target: string, at: string): void {
   fs.symlinkSync(target, at, "junction");
 }
 
-/** Appended to every profile patch: run_command row + stable compaction policy. */
-const PROFILE_BLOCK = `# Managed by bb plugin deepseek-harness.
+/** Legacy unmarked block written by plugin versions before 0.4.4; migrated in place. */
+const LEGACY_PROFILE_BLOCK = `# Managed by bb plugin deepseek-harness.
 # run_command exposes harness slash commands (e.g. /compact) to ACP clients.
 - insert:
     - id: command-tool
@@ -197,13 +197,51 @@ const PROFILE_BLOCK = `# Managed by bb plugin deepseek-harness.
     auto: true
 `;
 
+const MANAGED_START = "# >>> bb deepseek-harness";
+const MANAGED_END = "# <<< bb deepseek-harness";
+
+/**
+ * The plugin's own entries in every profile patch, between markers so install
+ * can rewrite them on upgrade without touching the user's entries around them.
+ */
+const PROFILE_BLOCK = `${MANAGED_START} (managed: rewritten by \`bb deepseek-harness install\`)
+# run_command exposes harness slash commands (e.g. /compact) to ACP clients.
+- insert:
+    - id: command-tool
+      name: '@deepseek-ai/dsh-command-tool'
+# Keep automatic condensation on: /compact over ACP is refused mid-thread.
+# compaction-basic triggers at min(0.8 x window, window - model maxTokens -
+# headroomTokens), and headroomTokens (default 65536, also the summary cap) with
+# a large model maxTokens fires at a quarter of a 200k window and lets a local
+# model spend minutes writing the summary.
+- id: compaction-basic
+  config:
+    auto: true
+    headroomTokens: 16384
+    maxTokens: 16384
+${MANAGED_END}
+`;
+
 function provisionProfile(profile: string): string {
   const dir = path.join(HOME, ".dsh", "profiles", profile);
   const file = path.join(dir, "cordis.patch.yml");
   if (!fs.existsSync(file)) return `${profile}: missing (create it with: dsh ${profile} --from-default-profile acp --dump-config)`;
   const body = fs.readFileSync(file, "utf8");
-  if (body.includes("command-tool")) return `${profile}: already patched`;
-  fs.writeFileSync(file, `${body.replace(/\s*$/u, "")}\n${PROFILE_BLOCK}`);
+  let next: string;
+  const start = body.indexOf(MANAGED_START);
+  const end = body.indexOf(MANAGED_END);
+  if (start !== -1 && end > start) {
+    const lineEnd = body.indexOf("\n", end);
+    next = body.slice(0, start) + PROFILE_BLOCK + (lineEnd === -1 ? "" : body.slice(lineEnd + 1));
+  } else if (body.includes(LEGACY_PROFILE_BLOCK)) {
+    next = body.replace(LEGACY_PROFILE_BLOCK, PROFILE_BLOCK);
+  } else if (body.includes("command-tool")) {
+    return `${profile}: has unmanaged run_command entries; left untouched`;
+  } else {
+    next = `${body.replace(/\s*$/u, "")}\n${PROFILE_BLOCK}`;
+  }
+  if (next === body) return `${profile}: up to date`;
+  fs.writeFileSync(file, next);
   return `${profile}: patched`;
 }
 

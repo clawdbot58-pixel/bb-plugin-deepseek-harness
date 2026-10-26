@@ -46,10 +46,15 @@ thread shows the same richness other providers get:
   Tools bb has no closer kind for (unknown/MCP tools, subagent, questions, goals,
   compaction, retries) are sent as named `switch_mode` rows: a sliders glyph labelled
   "Ran <tool>" rather than bb's toolbox glyph.
-- Compaction on a local model: dsh triggers at `min(0.8 × window, window − maxTokens −
-  headroomTokens)`, and `headroomTokens` defaults to 65536 (also the summary cap). Large
-  model `maxTokens` plus that default can trigger compaction at a quarter of the window;
-  set `compaction-basic.config.headroomTokens`/`maxTokens` in the profile patch.
+- Compaction policy: dsh triggers at `min(0.8 × window, window − maxTokens −
+  headroomTokens)`, and `headroomTokens` defaults to 65536 (also the summary cap), which
+  with a large model `maxTokens` fires at a quarter of a 200k window. The plugin's managed
+  profile block sets `headroomTokens: 16384` and `maxTokens: 16384`.
+
+Each profile's `cordis.patch.yml` carries one plugin-owned block between
+`# >>> bb deepseek-harness` and `# <<< bb deepseek-harness`; `install` rewrites only that
+block (migrating the unmarked block older versions appended), so keep your own entries
+outside it.
 
 ```sh
 bb deepseek-harness status            # patch lines report what is applied
