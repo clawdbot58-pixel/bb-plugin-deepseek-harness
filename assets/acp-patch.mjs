@@ -17,6 +17,8 @@
 //   6. live stream: forward `agent/assistant-stream` reasoning/text deltas as
 //      they arrive (deduplicated against the committed message) and show
 //      LLM retries as a row, so a long or interrupted step is never blank.
+//   7. row polish: closer tool kinds for run_code/run_command/job_*/skill and
+//      no tool row for todo_write (it renders as the plan task list).
 //
 // (4) matters for bb: its stable ACP adapter only restores a thread when the
 // agent advertises the older `loadSession` capability, and it calls
@@ -106,6 +108,16 @@ const RETRY_BRANCH_INJECT = `\t\t\t} else if (event.type === "llm/retry" || even
 \t\t\t\tconst completed = event.type === "turn/end" && event.data?.reason?.kind === "completed";
 \t\t\t\tbbAcpEnqueue(this, event.type === "llm/retry" ? bbAcpRetryUpdates(this, event) : bbAcpCloseRetries(this, completed ? "completed" : "failed"), "retry projection");
 ${RESULTS_BRANCH_ANCHOR}`;
+
+// --- row polish -------------------------------------------------------------
+// Kind "other" renders with bb's generic toolbox glyph. Re-route the dsh tools
+// that have a closer kind, and hide todo_write's row (its plan update is the
+// task list). Layered on the fidelity section so already-patched installs pick
+// it up without a reinstall of dsh.
+const POLISH_CALL_ANCHOR = `update: bbAcpProjectToolCall(event)`;
+const POLISH_CALL_INJECT = `update: bbAcpPolishToolCall(event)`;
+const TOOL_CALL_BRANCH_ANCHOR = `\t\t\t} else if (event.type === "tool/call") {`;
+const TOOL_CALL_BRANCH_INJECT = `\t\t\t} else if ((event.type === "tool/call" || event.type === "tool/result") && bbAcpHiddenTool(this, event)) {\n\t\t\t\t// bbAcpRowPolish: todo_write already renders as the plan; skip its tool row.\n${TOOL_CALL_BRANCH_ANCHOR}`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -381,6 +393,49 @@ function bbAcpRetryUpdates(record, event) {
 }
 `;
 
+const POLISH_HELPERS = `
+// bb patch (row polish): bb draws kind "other" with a generic toolbox glyph.
+// Give the remaining dsh tools the nearest real kind, and drop todo_write's
+// row since the same call already renders as the plan task list.
+function bbAcpHiddenTool(record, event) {
+\ttry {
+\t\trecord.bbAcpHidden ??= new Set();
+\t\tif (event.type === "tool/call") {
+\t\t\tif (event.data?.name !== "todo_write" || typeof event.data.callId !== "string") return false;
+\t\t\trecord.bbAcpHidden.add(event.data.callId);
+\t\t\treturn true;
+\t\t}
+\t\tconst callId = event.data?.message?.toolCallId;
+\t\treturn record.bbAcpHidden.delete(callId);
+\t} catch {
+\t\treturn false;
+\t}
+}
+function bbAcpPolishToolCall(event) {
+\ttry {
+\t\tconst data = event?.data;
+\t\tif (bbAcpIsObject(data) && typeof data.callId === "string" && typeof data.name === "string") {
+\t\t\tconst args = bbAcpParseArgs(data.arguments);
+\t\t\tswitch (data.name) {
+\t\t\t\tcase "run_code":
+\t\t\t\t\treturn bbAcpToolUpdate(event, "execute", bbAcpTitle(bbAcpPick(args, "description") ?? bbAcpPick(args, "code")));
+\t\t\t\tcase "run_command":
+\t\t\t\t\treturn bbAcpToolUpdate(event, "execute", bbAcpTitle(bbAcpPick(args, "command")));
+\t\t\t\tcase "job_output":
+\t\t\t\tcase "job_kill":
+\t\t\t\tcase "job_list":
+\t\t\t\t\treturn bbAcpToolUpdate(event, "execute", bbAcpTitle(\`\${data.name.replace("_", " ")} \${bbAcpPick(args, "job_id") ?? ""}\`));
+\t\t\t\tcase "skill":
+\t\t\t\t\treturn bbAcpToolUpdate(event, "read", bbAcpTitle(bbAcpPick(args, "name") ?? bbAcpPick(args, "skill")));
+\t\t\t}
+\t\t}
+\t} catch {
+\t\t// fall through to the fidelity projection
+\t}
+\treturn bbAcpProjectToolCall(event);
+}
+`;
+
 function fail(message) {
   console.error(`${message} — dsh-acp changed shape; inspect before patching`);
   process.exit(1);
@@ -437,6 +492,19 @@ try {
       .replace(ASSISTANT_ANCHOR, ASSISTANT_INJECT)
       .replace(RESULTS_BRANCH_ANCHOR, RETRY_BRANCH_INJECT) + LIVE_HELPERS;
     applied.push("live stream");
+  }
+
+  if (!source.includes("bbAcpRowPolish")) {
+    for (const [label, anchor] of [
+      ["fidelity tool_call projection", POLISH_CALL_ANCHOR],
+      ["tool/call branch", TOOL_CALL_BRANCH_ANCHOR],
+    ]) {
+      if (!source.includes(anchor)) fail(`anchor not found in ${label}`);
+    }
+    source = source
+      .replace(POLISH_CALL_ANCHOR, POLISH_CALL_INJECT)
+      .replace(TOOL_CALL_BRANCH_ANCHOR, TOOL_CALL_BRANCH_INJECT) + POLISH_HELPERS;
+    applied.push("row polish");
   }
 
   if (applied.length === 0) {

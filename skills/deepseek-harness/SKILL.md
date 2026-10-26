@@ -41,6 +41,10 @@ thread shows the same richness other providers get:
   (the committed message's duplicate text is dropped), so long or interrupted steps are
   visible and survive a crash in bb's history. `llm/retry` events show as a
   "Model request failed, retry n/m" row that closes when the model answers or the turn ends.
+- Row polish: `run_code`, `run_command`, and `job_*` render as command rows, `skill` as a
+  read row, and `todo_write` has no tool row of its own (the plan task list shows it).
+  Tools bb has no closer kind for (subagent, questions, goals, compaction, retries) keep
+  bb's generic tool glyph.
 
 ```sh
 bb deepseek-harness status            # patch lines report what is applied
