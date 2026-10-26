@@ -43,8 +43,13 @@ thread shows the same richness other providers get:
   "Model request failed, retry n/m" row that closes when the model answers or the turn ends.
 - Row polish: `run_code`, `run_command`, and `job_*` render as command rows, `skill` as a
   read row, and `todo_write` has no tool row of its own (the plan task list shows it).
-  Tools bb has no closer kind for (subagent, questions, goals, compaction, retries) keep
-  bb's generic tool glyph.
+  Tools bb has no closer kind for (unknown/MCP tools, subagent, questions, goals,
+  compaction, retries) are sent as named `switch_mode` rows: a sliders glyph labelled
+  "Ran <tool>" rather than bb's toolbox glyph.
+- Compaction on a local model: dsh triggers at `min(0.8 × window, window − maxTokens −
+  headroomTokens)`, and `headroomTokens` defaults to 65536 (also the summary cap). Large
+  model `maxTokens` plus that default can trigger compaction at a quarter of the window;
+  set `compaction-basic.config.headroomTokens`/`maxTokens` in the profile patch.
 
 ```sh
 bb deepseek-harness status            # patch lines report what is applied

@@ -19,6 +19,8 @@
 //      LLM retries as a row, so a long or interrupted step is never blank.
 //   7. row polish: closer tool kinds for run_code/run_command/job_*/skill and
 //      no tool row for todo_write (it renders as the plan task list).
+//   8. row style: remaining kind-"other" rows (unknown tools, compaction,
+//      retries) become named switch_mode rows instead of bb's toolbox glyph.
 //
 // (4) matters for bb: its stable ACP adapter only restores a thread when the
 // agent advertises the older `loadSession` capability, and it calls
@@ -118,6 +120,16 @@ const POLISH_CALL_ANCHOR = `update: bbAcpProjectToolCall(event)`;
 const POLISH_CALL_INJECT = `update: bbAcpPolishToolCall(event)`;
 const TOOL_CALL_BRANCH_ANCHOR = `\t\t\t} else if (event.type === "tool/call") {`;
 const TOOL_CALL_BRANCH_INJECT = `\t\t\t} else if ((event.type === "tool/call" || event.type === "tool/result") && bbAcpHiddenTool(this, event)) {\n\t\t\t\t// bbAcpRowPolish: todo_write already renders as the plan; skip its tool row.\n${TOOL_CALL_BRANCH_ANCHOR}`;
+
+// --- row style ---------------------------------------------------------------
+// Rows still on kind "other" (unknown tools, subagents, goals, compaction,
+// retries) get bb's toolbox glyph. Restyle them as named switch_mode rows.
+const STYLE_CALL_ANCHOR = `update: bbAcpPolishToolCall(event)`;
+const STYLE_CALL_INJECT = `update: bbAcpStyleRow(bbAcpPolishToolCall(event), event) /* bbAcpRowStyle */`;
+const STYLE_COMPACTION_ANCHOR = `: bbAcpCompactionUpdate(event, event.type === "compaction/start" ? "start" : "end");`;
+const STYLE_COMPACTION_INJECT = `: bbAcpStyleRow(bbAcpCompactionUpdate(event, event.type === "compaction/start" ? "start" : "end"));`;
+const STYLE_RETRY_ANCHOR = `event.type === "llm/retry" ? bbAcpRetryUpdates(this, event) :`;
+const STYLE_RETRY_INJECT = `event.type === "llm/retry" ? bbAcpRetryUpdates(this, event).map((update) => bbAcpStyleRow(update)) :`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -436,6 +448,33 @@ function bbAcpPolishToolCall(event) {
 }
 `;
 
+const STYLE_HELPERS = `
+// bb patch (row style): kind "other" is drawn with bb's toolbox glyph, which
+// reads as a suitcase. Send the remaining generic rows as "switch_mode" (a
+// sliders glyph) with an explicit tool name, so bb labels them "Ran <name>"
+// instead of "Switched mode".
+function bbAcpStyleRow(update, event) {
+\ttry {
+\t\tif (!bbAcpIsObject(update) || update.sessionUpdate !== "tool_call" || update.kind !== "other") return update;
+\t\tconst id = typeof update.toolCallId === "string" ? update.toolCallId : "";
+\t\tlet name;
+\t\tlet title = update.title;
+\t\tif (id.startsWith("bbAcpCompaction:")) {
+\t\t\tname = "compaction";
+\t\t\ttitle = "conversation history";
+\t\t} else if (id.startsWith("bbAcpRetry:")) name = "model retry";
+\t\telse name = typeof event?.data?.name === "string" ? event.data.name : void 0;
+\t\tif (name === void 0) return update;
+\t\tconst styled = { ...update, kind: "switch_mode", name };
+\t\tif (title === void 0 || title === name) delete styled.title;
+\t\telse styled.title = title;
+\t\treturn styled;
+\t} catch {
+\t\treturn update;
+\t}
+}
+`;
+
 function fail(message) {
   console.error(`${message} — dsh-acp changed shape; inspect before patching`);
   process.exit(1);
@@ -505,6 +544,21 @@ try {
       .replace(POLISH_CALL_ANCHOR, POLISH_CALL_INJECT)
       .replace(TOOL_CALL_BRANCH_ANCHOR, TOOL_CALL_BRANCH_INJECT) + POLISH_HELPERS;
     applied.push("row polish");
+  }
+
+  if (!source.includes("bbAcpRowStyle")) {
+    for (const [label, anchor] of [
+      ["polished tool_call projection", STYLE_CALL_ANCHOR],
+      ["compaction projection", STYLE_COMPACTION_ANCHOR],
+      ["retry projection", STYLE_RETRY_ANCHOR],
+    ]) {
+      if (!source.includes(anchor)) fail(`anchor not found in ${label}`);
+    }
+    source = source
+      .replace(STYLE_CALL_ANCHOR, STYLE_CALL_INJECT)
+      .replace(STYLE_COMPACTION_ANCHOR, STYLE_COMPACTION_INJECT)
+      .replace(STYLE_RETRY_ANCHOR, STYLE_RETRY_INJECT) + STYLE_HELPERS;
+    applied.push("row style");
   }
 
   if (applied.length === 0) {
