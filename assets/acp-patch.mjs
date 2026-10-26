@@ -23,6 +23,8 @@
 //      retries) become named switch_mode rows instead of bb's toolbox glyph.
 //   9. subagent rows: tag dsh's subagent tool as spawn_subagent so bb's grok
 //      dialect (set on the provider registration) draws a native subagent row.
+//  10. stale results: drop tool/result events for calls the bridge has not
+//      open (compaction pruning re-commits old results), avoiding orphan rows.
 //
 // (4) matters for bb: its stable ACP adapter only restores a thread when the
 // agent advertises the older `loadSession` capability, and it calls
@@ -138,6 +140,12 @@ const STYLE_RETRY_INJECT = `event.type === "llm/retry" ? bbAcpRetryUpdates(this,
 // tagged spawn_subagent into a native subagent row instead of a generic one.
 const DELEGATION_ANCHOR = `update: bbAcpStyleRow(bbAcpPolishToolCall(event), event)`;
 const DELEGATION_INJECT = `update: bbAcpDelegationRow(bbAcpStyleRow(bbAcpPolishToolCall(event), event), event)`;
+
+// --- stale results ------------------------------------------------------------
+// Compaction pruning re-commits old tool results; drop results for calls the
+// bridge did not open (or already closed) so bb does not grow orphan rows.
+const STALE_ANCHOR = `&& bbAcpHiddenTool(this, event)) {`;
+const STALE_INJECT = `&& (bbAcpHiddenTool(this, event) || bbAcpStaleResult(this, event))) {`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -500,6 +508,27 @@ function bbAcpDelegationRow(update, event) {
 }
 `;
 
+const STALE_HELPERS = `
+// bb patch (stale results): compaction pruning re-commits a shortened
+// tool/result for a call from an earlier turn. Forwarded, it reaches bb as an
+// update for a call bb closed long ago and becomes an orphan "Ran tool" row.
+// Only forward results for calls this bridge opened and has not yet closed.
+function bbAcpStaleResult(record, event) {
+\ttry {
+\t\trecord.bbAcpOpenCalls ??= new Set();
+\t\tif (event.type === "tool/call") {
+\t\t\tif (typeof event.data?.callId === "string") record.bbAcpOpenCalls.add(event.data.callId);
+\t\t\treturn false;
+\t\t}
+\t\tconst callId = event.data?.message?.toolCallId;
+\t\tif (typeof callId !== "string") return false;
+\t\treturn !record.bbAcpOpenCalls.delete(callId);
+\t} catch {
+\t\treturn false;
+\t}
+}
+`;
+
 function fail(message) {
   console.error(`${message} — dsh-acp changed shape; inspect before patching`);
   process.exit(1);
@@ -590,6 +619,12 @@ try {
     if (!source.includes(DELEGATION_ANCHOR)) fail("anchor not found in styled tool_call projection");
     source = source.replace(DELEGATION_ANCHOR, DELEGATION_INJECT) + DELEGATION_HELPERS;
     applied.push("subagent rows");
+  }
+
+  if (!source.includes("bbAcpStaleResult")) {
+    if (!source.includes(STALE_ANCHOR)) fail("anchor not found in hidden-tool branch");
+    source = source.replace(STALE_ANCHOR, STALE_INJECT) + STALE_HELPERS;
+    applied.push("stale results");
   }
 
   if (applied.length === 0) {

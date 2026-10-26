@@ -355,6 +355,7 @@ function status(): string[] {
   rows.push(`dsh-acp row polish: ${acp.includes("bbAcpRowPolish") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp row style: ${acp.includes("bbAcpRowStyle") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp subagent rows: ${acp.includes("bbAcpDelegationRow") ? "applied" : "not applied"}`);
+  rows.push(`dsh-acp stale results: ${acp.includes("bbAcpStaleResult") ? "applied" : "not applied"}`);
   const selfRepair = fs.existsSync(ACP_PATCH) && fs.existsSync(path.join(TOOL_ASSETS, "index.js"));
   rows.push(`upgrade self-repair: ${selfRepair ? "armed" : "missing (re-run install)"}`);
   return rows;

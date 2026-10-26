@@ -51,6 +51,9 @@ thread shows the same richness other providers get:
   native subagent row ("Running subagent · <description>", closing with the child's
   result). bb's ACP bridge cannot nest a child's own tool calls under it; the composer
   chip/popup below shows each child's live state.
+- Stale results: compaction pruning re-commits shortened results for old tool calls; the
+  bridge forwards a result only for a call it opened and has not closed, so bb never grows
+  an orphan "Ran tool" row.
 - Compaction policy: dsh triggers at `min(0.8 × window, window − maxTokens −
   headroomTokens)`, and `headroomTokens` defaults to 65536 (also the summary cap), which
   with a large model `maxTokens` fires at a quarter of a 200k window. The plugin's managed
