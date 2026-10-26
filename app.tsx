@@ -14,7 +14,7 @@
 //
 // Source is deliberately ASCII-only: this file has been corrupted twice by text
 // tooling that round-tripped non-ASCII characters.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { definePluginApp, useComposer, useRpc } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "./server";
 
@@ -66,7 +66,6 @@ function ModeBanner() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [pending, setPending] = useState<Mode | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const probeKey = useRef<string | null>(null);
   const isDsh = providerId === "acp-deepseek";
 
   // Every hook stays above the early returns: the composer's provider can
@@ -90,19 +89,6 @@ function ModeBanner() {
       cancelled = true;
     };
   }, [isDsh, threadId, rpc]);
-
-  useEffect(() => {
-    const key = `${providerId ?? "null"}|${scope.kind}`;
-    if (probeKey.current === key) return;
-    probeKey.current = key;
-    rpc
-      .call("mode_probe", {
-        providerId,
-        scopeKind: scope.kind,
-        hasSelection: composer.selection !== null,
-      })
-      .catch(() => undefined);
-  }, [providerId, scope.kind, composer.selection, rpc]);
 
   if (!isDsh) return null;
 

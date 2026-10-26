@@ -251,8 +251,8 @@ async function provision(): Promise<string[]> {
       env: { DSH_HOME: path.join(HOME, ".dsh") },
       nativeReasoning: {
         configId: "reasoning_effort",
-        supportedLevels: ["none", "low", "high", "max"],
-        levelValues: { none: "off", low: "low", high: "high", max: "max" },
+        supportedLevels: ["none", "low", "medium", "high", "max"],
+        levelValues: { none: "off", low: "low", medium: "medium", high: "high", max: "max" },
         defaultLevel: "high",
       },
     },
@@ -310,6 +310,7 @@ function status(): string[] {
   rows.push(`dsh-acp command patch: ${acp.includes("bbAcpRunCommand") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp session/load bridge: ${acp.includes("bbAcpLoadSessionBridge") ? "applied" : "not applied"}`);
   rows.push(`dsh-acp fidelity projection: ${acp.includes("bbAcpProjectToolCall") ? "applied" : "not applied"}`);
+  rows.push(`dsh-acp live stream: ${acp.includes("bbAcpLiveStream") ? "applied" : "not applied"}`);
   const selfRepair = fs.existsSync(ACP_PATCH) && fs.existsSync(path.join(TOOL_ASSETS, "index.js"));
   rows.push(`upgrade self-repair: ${selfRepair ? "armed" : "missing (re-run install)"}`);
   return rows;

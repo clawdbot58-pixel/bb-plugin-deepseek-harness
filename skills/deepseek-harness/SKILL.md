@@ -25,7 +25,7 @@ moving to a new machine, or to re-register the provider.
 
 ## Timeline integration (fidelity projection)
 
-The `dsh-acp` patch also projects dsh's UI-only facts onto standard ACP updates, so a,
+The `dsh-acp` patch also projects dsh's UI-only facts onto standard ACP updates, so a
 thread shows the same richness other providers get:
 
 - `tool_call` updates carry a real `kind` and a useful title: `bash` → `execute` (streamed
@@ -37,9 +37,13 @@ thread shows the same richness other providers get:
 - `todo/write` events become ACP `plan` updates, rendered as a live task list.
 - `compaction/start` / `compaction/end` become a "Compacting conversation history" row
   that closes on completion (or fails visibly).
+- Live stream: `agent/assistant-stream` reasoning/text deltas are forwarded as they arrive
+  (the committed message's duplicate text is dropped), so long or interrupted steps are
+  visible and survive a crash in bb's history. `llm/retry` events show as a
+  "Model request failed, retry n/m" row that closes when the model answers or the turn ends.
 
 ```sh
-bb deepseek-harness status            # three patch lines report what is applied
+bb deepseek-harness status            # patch lines report what is applied
 bb deepseek-harness install           # re-apply all patch sections
 ```
 

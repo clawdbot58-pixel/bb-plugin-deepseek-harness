@@ -14,6 +14,9 @@
 //          show the pattern or query
 //        * `todo/write` events become ACP `plan` updates (live task list)
 //        * compaction/start + compaction/end become a visible lifecycle row
+//   6. live stream: forward `agent/assistant-stream` reasoning/text deltas as
+//      they arrive (deduplicated against the committed message) and show
+//      LLM retries as a row, so a long or interrupted step is never blank.
 //
 // (4) matters for bb: its stable ACP adapter only restores a thread when the
 // agent advertises the older `loadSession` capability, and it calls
@@ -84,7 +87,25 @@ const RESULTS_BRANCH_INJECT = `\t\t\t} else if (event.type === "todo/write" || e
 \t\t\t\t\t})).catch((error) => {
 \t\t\t\t\t\tthis.ctx.logger.warn(\`acp: session projection delivery failed: \${errorChain(error)}\`);
 \t\t\t\t\t});
-\t\t\t\t}${RESULTS_BRANCH_ANCHOR}`;
+\t\t\t\t}
+${RESULTS_BRANCH_ANCHOR}`;
+
+// --- live stream -----------------------------------------------------------
+// The bridge marshals only committed session events. A model step that thinks
+// for minutes, retries a failing backend, or is cut short by a crash therefore
+// showed in bb as a bare "running" turn with nothing in it, and an interrupted
+// step's output never arrived at all. dsh already publishes the live stream as
+// `agent/assistant-stream` frames (its headless runner and web UI use them).
+const STREAM_SUB_ANCHOR = `\tctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {\n`;
+const STREAM_SUB_INJECT = `\t// bbAcpLiveStream: forward the top-level agent's assistant stream as it arrives.\n\tctx.on("agent/assistant-stream", ({ agent, frame }) => {\n\t\tconst record = ownedRecord(agent);\n\t\tif (record !== void 0) bbAcpOnAssistantStream(record, frame);\n\t});\n${STREAM_SUB_ANCHOR}`;
+
+const ASSISTANT_ANCHOR = `for (const update of await assistantUpdates(this.ctx, session, event)) await this.notify({`;
+const ASSISTANT_INJECT = `for (const update of bbAcpDedupAssistant(this, event, await assistantUpdates(this.ctx, session, event))) await this.notify({`;
+
+const RETRY_BRANCH_INJECT = `\t\t\t} else if (event.type === "llm/retry" || event.type === "turn/end") {
+\t\t\t\tconst completed = event.type === "turn/end" && event.data?.reason?.kind === "completed";
+\t\t\t\tbbAcpEnqueue(this, event.type === "llm/retry" ? bbAcpRetryUpdates(this, event) : bbAcpCloseRetries(this, completed ? "completed" : "failed"), "retry projection");
+${RESULTS_BRANCH_ANCHOR}`;
 
 const HELPERS = `
 // bb patch (reapply with E:/dsh-plugins/dsh-acp-command-patch.mjs):
@@ -279,6 +300,87 @@ function bbAcpCompactionUpdate(event, stage) {
 }
 `;
 
+const LIVE_HELPERS = `
+// bb patch (live stream): dsh's bridge only marshals committed events, so a
+// long model step (minutes of thinking, retries, compaction) reached ACP as
+// nothing at all and an interrupted step never reached it. Forward the
+// agent's live assistant stream as it arrives, drop the text the committed
+// message would repeat, and surface LLM retries as a lifecycle row.
+function bbAcpLiveState(record) {
+\trecord.bbAcpLive ??= { attempts: new Map(), streamed: new Set(), retries: new Set() };
+\treturn record.bbAcpLive;
+}
+function bbAcpEnqueue(record, updates, label) {
+\tfor (const update of updates) {
+\t\tconst previous = record.outputTail;
+\t\trecord.outputTail = previous.then(() => record.notify({
+\t\t\tsessionId: record.agent.session.id,
+\t\t\tupdate
+\t\t})).catch((error) => {
+\t\t\trecord.ctx.logger.warn(\`acp: \${label} delivery failed: \${errorChain(error)}\`);
+\t\t});
+\t}
+}
+function bbAcpCloseRetries(record, status) {
+\tconst live = record.bbAcpLive;
+\tif (live === void 0 || live.retries.size === 0) return [];
+\tconst updates = [...live.retries].map((toolCallId) => ({ sessionUpdate: "tool_call_update", toolCallId, status }));
+\tlive.retries.clear();
+\treturn updates;
+}
+function bbAcpOnAssistantStream(record, frame) {
+\ttry {
+\t\tif (record.closing !== void 0 || !bbAcpIsObject(frame)) return;
+\t\tconst live = bbAcpLiveState(record);
+\t\tif (frame.type === "start") {
+\t\t\tlive.attempts.set(frame.attemptId, \`\${frame.turn}:\${frame.step}\`);
+\t\t\treturn;
+\t\t}
+\t\tif (frame.type === "end") {
+\t\t\tlive.attempts.delete(frame.attemptId);
+\t\t\treturn;
+\t\t}
+\t\tconst chunk = frame.chunk;
+\t\tif (frame.type !== "chunk" || !bbAcpIsObject(chunk) || typeof chunk.text !== "string" || chunk.text.length === 0) return;
+\t\tlet sessionUpdate;
+\t\tif (chunk.type === "reasoning-delta") sessionUpdate = "agent_thought_chunk";
+\t\telse if (chunk.type === "text-delta") sessionUpdate = "agent_message_chunk";
+\t\telse return;
+\t\tconst key = live.attempts.get(frame.attemptId);
+\t\tif (key !== void 0) live.streamed.add(key);
+\t\tbbAcpEnqueue(record, [...bbAcpCloseRetries(record, "completed"), { sessionUpdate, content: { type: "text", text: chunk.text } }], "live stream");
+\t} catch {
+\t\t// live output is best-effort; the committed message still arrives
+\t}
+}
+function bbAcpDedupAssistant(record, event, updates) {
+\tconst live = record.bbAcpLive;
+\tconst key = \`\${event?.data?.turn}:\${event?.data?.step}\`;
+\tconst closing = bbAcpCloseRetries(record, "completed");
+\tif (live === void 0 || !live.streamed.has(key)) return [...closing, ...updates];
+\tlive.streamed.delete(key);
+\treturn [...closing, ...updates.filter((update) => update.sessionUpdate !== "agent_thought_chunk" && !(update.sessionUpdate === "agent_message_chunk" && update.content?.type === "text"))];
+}
+function bbAcpRetryUpdates(record, event) {
+\ttry {
+\t\tconst data = event?.data;
+\t\tif (!bbAcpIsObject(data)) return [];
+\t\tconst live = bbAcpLiveState(record);
+\t\tconst toolCallId = \`bbAcpRetry:\${typeof data.retryId === "string" ? data.retryId : "current"}\`;
+\t\tconst attempt = typeof data.retry === "number" ? \`\${data.retry}\${typeof data.maxRetries === "number" ? \`/\${data.maxRetries}\` : ""}\` : "";
+\t\tconst delay = typeof data.delayMs === "number" ? \` in \${Math.max(1, Math.round(data.delayMs / 1e3))}s\` : "";
+\t\tconst title = \`Model request failed, retry \${attempt}\${delay}\`.replace(/\\s+/gu, " ").trim();
+\t\tconst failure = bbAcpTitle(data.failure?.message, 400);
+\t\tconst content = failure === void 0 ? [] : [{ type: "content", content: { type: "text", text: failure } }];
+\t\tif (live.retries.has(toolCallId)) return [{ sessionUpdate: "tool_call_update", toolCallId, title, status: "in_progress", content }];
+\t\tlive.retries.add(toolCallId);
+\t\treturn [{ sessionUpdate: "tool_call", toolCallId, title, kind: "other", status: "in_progress", content }];
+\t} catch {
+\t\treturn [];
+\t}
+}
+`;
+
 function fail(message) {
   console.error(`${message} — dsh-acp changed shape; inspect before patching`);
   process.exit(1);
@@ -320,6 +422,21 @@ try {
     }
     source = source.replace(TOOLCALL_ANCHOR, TOOLCALL_INJECT).replace(RESULTS_BRANCH_ANCHOR, RESULTS_BRANCH_INJECT) + FIDELITY_HELPERS;
     applied.push("fidelity projection");
+  }
+
+  if (!source.includes("bbAcpLiveStream")) {
+    for (const [label, anchor] of [
+      ["assistant-stream subscription", STREAM_SUB_ANCHOR],
+      ["assistant/message marshalling", ASSISTANT_ANCHOR],
+      ["tool/result branch", RESULTS_BRANCH_ANCHOR],
+    ]) {
+      if (!source.includes(anchor)) fail(`anchor not found in ${label}`);
+    }
+    source = source
+      .replace(STREAM_SUB_ANCHOR, STREAM_SUB_INJECT)
+      .replace(ASSISTANT_ANCHOR, ASSISTANT_INJECT)
+      .replace(RESULTS_BRANCH_ANCHOR, RETRY_BRANCH_INJECT) + LIVE_HELPERS;
+    applied.push("live stream");
   }
 
   if (applied.length === 0) {

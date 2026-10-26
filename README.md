@@ -28,6 +28,11 @@ small pieces dsh needs to behave like a normal bb agent.
   searches show the pattern or query, `run_code` and subagents carry their description,
   `todo_write` renders as a live task list, and automatic compaction gets a visible
   "Compacting conversation history" row that closes when it finishes (or reports the failure).
+- **Live output** — dsh's bridge only sends committed events, so a long thinking step, a
+  backend retry loop, or a crash mid-step used to leave the turn showing just "running".
+  The patch forwards dsh's live assistant stream (reasoning and text deltas) as it arrives,
+  drops the copy the committed message would repeat, and shows LLM retries as a
+  "Model request failed, retry n/m" row. Whatever streamed before a crash stays in bb's history.
 - **Subagent visibility** — dsh children never cross the ACP wire, so the plugin reads
   the state dsh persists for its own UI: a compact chip in the composer's action row
   (beside the model picker) shows how many subagents the thread deployed and how many
